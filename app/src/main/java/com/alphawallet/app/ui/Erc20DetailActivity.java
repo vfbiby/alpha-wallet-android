@@ -1,5 +1,11 @@
 package com.alphawallet.app.ui;
 
+import static com.alphawallet.app.C.ETH_SYMBOL;
+import static com.alphawallet.app.C.Key.WALLET;
+import static com.alphawallet.app.repository.TokensRealmSource.databaseKey;
+import static com.alphawallet.app.ui.MyAddressActivity.KEY_MODE;
+import static com.alphawallet.ethereum.EthereumNetworkBase.MAINNET_ID;
+
 import android.content.Context;
 import android.content.Intent;
 import android.media.Ringtone;
@@ -9,6 +15,7 @@ import android.os.Bundle;
 import android.text.format.DateUtils;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
 
 import androidx.annotation.Nullable;
 import androidx.core.util.Pair;
@@ -35,6 +42,7 @@ import com.alphawallet.app.ui.widget.adapter.ActivityAdapter;
 import com.alphawallet.app.ui.widget.adapter.TabPagerAdapter;
 import com.alphawallet.app.ui.widget.adapter.TokensAdapter;
 import com.alphawallet.app.util.TabUtils;
+import com.alphawallet.app.viewmodel.Erc20DetailViewModel;
 import com.alphawallet.app.widget.ActivityHistoryList;
 import com.alphawallet.app.widget.CertifiedToolbarView;
 import com.alphawallet.app.widget.FunctionButtonBar;
@@ -51,15 +59,6 @@ import java.util.List;
 import dagger.hilt.android.AndroidEntryPoint;
 import io.realm.Realm;
 import io.realm.RealmResults;
-import com.alphawallet.app.viewmodel.Erc20DetailViewModel;
-
-import static com.alphawallet.app.C.ETH_SYMBOL;
-import static com.alphawallet.app.C.Key.WALLET;
-import static com.alphawallet.app.repository.TokensRealmSource.databaseKey;
-import static com.alphawallet.app.ui.MyAddressActivity.KEY_MODE;
-import static com.alphawallet.ethereum.EthereumNetworkBase.MAINNET_ID;
-
-import javax.inject.Inject;
 
 @AndroidEntryPoint
 public class Erc20DetailActivity extends BaseActivity implements StandardFunctionInterface, BuyCryptoInterface
@@ -81,7 +80,7 @@ public class Erc20DetailActivity extends BaseActivity implements StandardFunctio
 
     private ViewPager2 viewPager;
 
-    private class DetailPage {
+    private static class DetailPage {
         private final int tabNameResourceId;
         private final Fragment fragment;
 
@@ -204,7 +203,23 @@ public class Erc20DetailActivity extends BaseActivity implements StandardFunctio
                     .get(Erc20DetailViewModel.class);
             viewModel.newScriptFound().observe(this, this::onNewScript);
             viewModel.sig().observe(this, this::onSignature);
+            viewModel.scriptUpdateInProgress().observe(this, this::startScriptDownload);
 //            findViewById(R.id.certificate_spinner).setVisibility(View.VISIBLE); //Samoa TODO: restore certificate toolbar
+        }
+    }
+
+    private void startScriptDownload(Boolean status)
+    {
+        CertifiedToolbarView certificateToolbar = findViewById(R.id.certified_toolbar);
+        if (status)
+        {
+            certificateToolbar.setVisibility(View.VISIBLE);
+            certificateToolbar.startDownload();
+        }
+        else
+        {
+            certificateToolbar.stopDownload();
+            certificateToolbar.setVisibility(View.GONE);
         }
     }
 
@@ -216,6 +231,9 @@ public class Erc20DetailActivity extends BaseActivity implements StandardFunctio
         tokenViewAdapter.updateToken(new TokenCardMeta(token.tokenInfo.chainId, token.getAddress(), "force_update",
                 token.updateBlancaTime, token.lastTxCheck, token.getInterfaceSpec(), group), true);
         viewModel.checkTokenScriptValidity(token); //check script signature
+        CertifiedToolbarView certificateToolbar = findViewById(R.id.certified_toolbar);
+        certificateToolbar.stopDownload();
+        setupButtons();
     }
 
     private void onSignature(XMLDsigDescriptor descriptor)
@@ -236,7 +254,7 @@ public class Erc20DetailActivity extends BaseActivity implements StandardFunctio
         //TODO: Fix Realm leak
         activityHistoryList.setupAdapter(adapter);
         activityHistoryList.startActivityListeners(viewModel.getRealmInstance(wallet), wallet,
-                token, viewModel.getTokensService(), BigInteger.ZERO, HISTORY_LENGTH);
+                token, viewModel.getTokensService(), HISTORY_LENGTH);
     }
 
     private void setUpTokenView()
@@ -376,7 +394,7 @@ public class Erc20DetailActivity extends BaseActivity implements StandardFunctio
         {
             activityHistoryList.resetAdapter();
             activityHistoryList.startActivityListeners(viewModel.getRealmInstance(wallet), wallet,
-                    token, viewModel.getTokensService(), BigInteger.ZERO, HISTORY_LENGTH);
+                    token, viewModel.getTokensService(), HISTORY_LENGTH);
             viewModel.getTokensService().setFocusToken(token);
             viewModel.restartServices();
         }

@@ -112,8 +112,8 @@ public class TokenFunctionViewModel extends BaseViewModel {
     private final MutableLiveData<List<OpenSeaAsset.Trait>> traits = new MutableLiveData<>();
     private final MutableLiveData<NFTAsset> attrs = new MutableLiveData<>();
     private final MutableLiveData<AssetContract> assetContract = new MutableLiveData<>();
-    private final MutableLiveData<OpenSeaAsset> openSeaAsset = new MutableLiveData<>();
     private final MutableLiveData<NFTAsset> nftAsset = new MutableLiveData<>();
+    private final MutableLiveData<Boolean> scriptUpdateInProgress = new MutableLiveData<>();
 
     private Wallet wallet;
 
@@ -125,6 +125,9 @@ public class TokenFunctionViewModel extends BaseViewModel {
 
     @Nullable
     private Disposable calcGasCost;
+
+    @Nullable
+    private Disposable scriptUpdate;
 
     @Inject
     TokenFunctionViewModel(
@@ -181,6 +184,8 @@ public class TokenFunctionViewModel extends BaseViewModel {
         return newScriptFound;
     }
 
+    public LiveData<Boolean> scriptUpdateInProgress() { return scriptUpdateInProgress; }
+
     public MutableLiveData<TransactionData> transactionFinalised()
     {
         return transactionFinalised;
@@ -201,19 +206,9 @@ public class TokenFunctionViewModel extends BaseViewModel {
         return traits;
     }
 
-    public MutableLiveData<NFTAsset> attrs()
-    {
-        return attrs;
-    }
-
     public MutableLiveData<AssetContract> assetContract()
     {
         return assetContract;
-    }
-
-    public MutableLiveData<OpenSeaAsset> openSeaAsset()
-    {
-        return openSeaAsset;
     }
 
     public MutableLiveData<NFTAsset> nftAsset()
@@ -564,6 +559,10 @@ public class TokenFunctionViewModel extends BaseViewModel {
         {
             metadataDisposable.dispose();
         }
+        if (scriptUpdate != null && !scriptUpdate.isDisposed())
+        {
+            scriptUpdate.dispose();
+        }
     }
 
     public OpenSeaService getOpenseaService()
@@ -578,17 +577,24 @@ public class TokenFunctionViewModel extends BaseViewModel {
 
     public void checkForNewScript(Token token)
     {
+        if (token == null) return;
         //check server for new tokenscript
-        assetDefinitionService.checkServerForScript(token.tokenInfo.chainId, token.getAddress())
+        scriptUpdate = assetDefinitionService.checkServerForScript(token, scriptUpdateInProgress)
                 .observeOn(Schedulers.io())
                 .subscribeOn(Schedulers.single())
-                .subscribe(this::handleDefinition, this::onError)
-                .isDisposed();
+                .subscribe(this::handleDefinition, e -> scriptUpdateInProgress.postValue(false));
     }
 
     private void handleDefinition(TokenDefinition td)
     {
-        if (!TextUtils.isEmpty(td.holdingToken)) newScriptFound.postValue(true);
+        if (!TextUtils.isEmpty(td.holdingToken))
+        {
+            newScriptFound.postValue(true);
+        }
+        else
+        {
+            scriptUpdateInProgress.postValue(false);
+        }
     }
 
     public boolean isAuthorizeToFunction()
@@ -686,7 +692,9 @@ public class TokenFunctionViewModel extends BaseViewModel {
 
     public void getAuthentication(Activity activity, SignAuthenticationCallback callback)
     {
-        keyService.getAuthenticationForSignature(wallet, activity, callback);
+        genericWalletInteract.find()
+                .subscribe(wallet -> keyService.getAuthenticationForSignature(wallet, activity, callback))
+                .isDisposed();
     }
 
     public void sendTransaction(Web3Transaction finalTx, long chainId, String overridenTxHash)
@@ -782,6 +790,11 @@ public class TokenFunctionViewModel extends BaseViewModel {
     {
         loadExistingMetadata(token, tokenId);
 
+        reloadMetadata(token, tokenId);
+    }
+
+    public void reloadMetadata(Token token, BigInteger tokenId)
+    {
         openseaDisposable = openseaService.getAsset(token, tokenId)
                 .subscribeOn(Schedulers.io())
                 .observeOn(AndroidSchedulers.mainThread())
@@ -803,20 +816,13 @@ public class TokenFunctionViewModel extends BaseViewModel {
             {
                 JSONObject assetJson = new JSONObject(result);
                 OpenSeaAsset osAsset = new Gson().fromJson(assetJson.toString(), OpenSeaAsset.class);
-                if (osAsset != null)
+                NFTAsset asset = new NFTAsset(result);
+                if (!TextUtils.isEmpty(asset.getImage()))
                 {
-                    openSeaAsset.postValue(osAsset);
-
-                    if (osAsset.isValid())
-                    {
-                        // If asset does not have name, description or image, load from contract later
-                        loadedFromApi = true;
-                    }
-                    else
-                    {
-                        // Search OpenSeaAsset for name, description or image later when `NFTAsset.updateFromRaw()` is invoked
-                        oldAsset.attachOpenSeaAssetData(osAsset);
-                    }
+                    loadedFromApi = true;
+                    storeAsset(token, tokenId, new NFTAsset(result), oldAsset);
+                    asset.attachOpenSeaAssetData(osAsset);
+                    nftAsset.postValue(asset);
                 }
             }
             catch (JSONException e)

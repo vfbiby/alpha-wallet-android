@@ -68,6 +68,9 @@
         <!-- The color applied to chart tabs -->
         <item name="colorSurfaceDark">@color/surface_dark</item>
 
+        <item name="colorSurfaceVariant"></item>
+
+
         <!-- Default Component Styles -->
         <item name="android:textColor">@color/text_primary</item>
         <item name="android:textColorHint">@color/text_secondary</item>
@@ -120,6 +123,7 @@
         <item name="colorSurface">@color/background_floating</item>
         <item name="colorSecondary">@color/brand</item>
         <item name="colorControlNormal">@color/surface_inverse</item>
+        <item name="colorError">@color/error</item>
         <item name="android:textColorPrimary">@color/text_primary</item>
         <item name="android:textColorPrimaryInverse">@color/text_primary_inverse</item>
         <item name="android:textColorSecondary">@color/text_secondary</item>

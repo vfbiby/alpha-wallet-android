@@ -1,5 +1,6 @@
 package com.alphawallet.app.ui;
 
+import static com.alphawallet.app.widget.AWalletAlertDialog.ERROR;
 import static com.alphawallet.app.widget.AWalletAlertDialog.WARNING;
 
 import android.content.Intent;
@@ -11,7 +12,6 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.animation.Animation;
 import android.view.animation.AnimationUtils;
-import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
@@ -26,6 +26,7 @@ import com.alphawallet.app.C;
 import com.alphawallet.app.R;
 import com.alphawallet.app.entity.SignAuthenticationCallback;
 import com.alphawallet.app.entity.StandardFunctionInterface;
+import com.alphawallet.app.entity.TransactionData;
 import com.alphawallet.app.entity.Wallet;
 import com.alphawallet.app.entity.WalletType;
 import com.alphawallet.app.entity.nftassets.NFTAsset;
@@ -39,12 +40,14 @@ import com.alphawallet.app.viewmodel.TokenFunctionViewModel;
 import com.alphawallet.app.web3.entity.Web3Transaction;
 import com.alphawallet.app.widget.AWalletAlertDialog;
 import com.alphawallet.app.widget.ActionSheetDialog;
+import com.alphawallet.app.widget.CertifiedToolbarView;
 import com.alphawallet.app.widget.FunctionButtonBar;
 import com.alphawallet.app.widget.NFTImageView;
 import com.alphawallet.app.widget.TokenInfoCategoryView;
 import com.alphawallet.app.widget.TokenInfoView;
 import com.alphawallet.ethereum.EthereumNetworkBase;
 import com.alphawallet.token.entity.TSAction;
+import com.alphawallet.token.entity.XMLDsigDescriptor;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -67,13 +70,11 @@ public class NFTAssetDetailActivity extends BaseActivity implements StandardFunc
     private String sequenceId;
     private ActionSheetDialog confirmationDialog;
     private AWalletAlertDialog dialog;
-    private NFTAsset asset;
     private NFTImageView tokenImage;
     private NFTAttributeLayout nftAttributeLayout;
     private TextView tokenDescription;
     private ActionMenuItemView refreshMenu;
     private ProgressBar progressBar;
-    private TokenInfoCategoryView detailsLabel;
     private TokenInfoCategoryView descriptionLabel;
     private TokenInfoView tivTokenId;
     private TokenInfoView tivNetwork;
@@ -90,6 +91,7 @@ public class NFTAssetDetailActivity extends BaseActivity implements StandardFunc
     private Animation rotation;
     private ActivityResultLauncher<Intent> handleTransactionSuccess;
     private ActivityResultLauncher<Intent> getGasSettings;
+    private boolean triggeredReload;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState)
@@ -110,8 +112,6 @@ public class NFTAssetDetailActivity extends BaseActivity implements StandardFunc
         setTitle(token.tokenInfo.name);
 
         setupFunctionBar();
-
-        asset = token.getTokenAssets().get(tokenId);
 
         updateDefaultTokenData();
     }
@@ -178,7 +178,6 @@ public class NFTAssetDetailActivity extends BaseActivity implements StandardFunc
         tokenImage = findViewById(R.id.asset_image);
         nftAttributeLayout = findViewById(R.id.attributes);
         tokenDescription = findViewById(R.id.token_description);
-        detailsLabel = findViewById(R.id.label_details);
         descriptionLabel = findViewById(R.id.label_description);
         progressBar = findViewById(R.id.progress);
         tivTokenId = findViewById(R.id.token_id);
@@ -205,6 +204,8 @@ public class NFTAssetDetailActivity extends BaseActivity implements StandardFunc
         wallet = getIntent().getParcelableExtra(C.Key.WALLET);
         tokenId = new BigInteger(getIntent().getStringExtra(C.EXTRA_TOKEN_ID));
         sequenceId = getIntent().getStringExtra(C.EXTRA_STATE);
+        viewModel.checkForNewScript(token);
+        viewModel.checkTokenScriptValidity(token);
     }
 
     private void initViewModel()
@@ -212,8 +213,48 @@ public class NFTAssetDetailActivity extends BaseActivity implements StandardFunc
         viewModel = new ViewModelProvider(this)
                 .get(TokenFunctionViewModel.class);
         viewModel.gasEstimateComplete().observe(this, this::checkConfirm);
-        viewModel.openSeaAsset().observe(this, this::onOpenSeaAsset);
         viewModel.nftAsset().observe(this, this::onNftAsset);
+        viewModel.transactionFinalised().observe(this, this::txWritten);
+        viewModel.transactionError().observe(this, this::txError);
+        viewModel.scriptUpdateInProgress().observe(this, this::startScriptDownload);
+        viewModel.sig().observe(this, this::onSignature);
+        viewModel.newScriptFound().observe(this, this::newScriptFound);
+    }
+
+    private void newScriptFound(Boolean status)
+    {
+        CertifiedToolbarView certificateToolbar = findViewById(R.id.certified_toolbar);
+        certificateToolbar.stopDownload();
+        //determinate signature
+        if (token != null)
+        {
+            certificateToolbar.setVisibility(View.VISIBLE);
+            viewModel.checkTokenScriptValidity(token);
+
+            //now re-load the verbs
+            setupFunctionBar();
+        }
+    }
+
+    private void onSignature(XMLDsigDescriptor descriptor)
+    {
+        CertifiedToolbarView certificateToolbar = findViewById(R.id.certified_toolbar);
+        certificateToolbar.onSigData(descriptor, this);
+    }
+
+    private void startScriptDownload(Boolean status)
+    {
+        CertifiedToolbarView certificateToolbar = findViewById(R.id.certified_toolbar);
+        if (status)
+        {
+            certificateToolbar.setVisibility(View.VISIBLE);
+            certificateToolbar.startDownload();
+        }
+        else
+        {
+            certificateToolbar.stopDownload();
+            certificateToolbar.setVisibility(View.GONE);
+        }
     }
 
     private void setupFunctionBar()
@@ -229,10 +270,11 @@ public class NFTAssetDetailActivity extends BaseActivity implements StandardFunc
 
     private void reloadMetadata()
     {
+        triggeredReload = true;
         refreshMenu = findViewById(R.id.action_reload_metadata);
         refreshMenu.startAnimation(rotation);
         progressBar.setVisibility(View.VISIBLE);
-        viewModel.getAsset(token, tokenId);
+        viewModel.reloadMetadata(token, tokenId);
     }
 
     private void clearRefreshAnimation()
@@ -269,30 +311,27 @@ public class NFTAssetDetailActivity extends BaseActivity implements StandardFunc
     {
         if (asset != null)
         {
-            updateTokenImage(asset.getImage());
+            updateTokenImage(asset);
 
             addMetaDataInfo(asset);
 
             nftAttributeLayout.bind(token, asset);
 
             clearRefreshAnimation();
+
+            loadFromOpenSeaData(asset.getOpenSeaAsset());
         }
     }
 
-    private void updateTokenImage(String imageUrl)
+    private void updateTokenImage(NFTAsset asset)
     {
-        if (tokenImage.shouldLoad(imageUrl))
+        if (triggeredReload) tokenImage.clearImage();
+        tokenImage.setupTokenImage(asset);
+        triggeredReload = false;
+
+        if (!tokenImage.isDisplayingImage() && TextUtils.isEmpty(asset.getImage()))
         {
-            if (TextUtils.isEmpty(imageUrl))
-            {
-                tokenImage.showFallbackLayout(token);
-            }
-            else
-            {
-                tokenImage.setWebViewHeight(tokenImage.getLayoutParams().width);
-                tokenImage.showLoadingProgress(true);
-                tokenImage.setupTokenImage(asset);
-            }
+            tokenImage.showFallbackLayout(token);
         }
     }
 
@@ -330,9 +369,9 @@ public class NFTAssetDetailActivity extends BaseActivity implements StandardFunc
 
     private void loadFromOpenSeaData(OpenSeaAsset openSeaAsset)
     {
-        updateDefaultTokenData();
+        if (openSeaAsset == null) return;
 
-        updateTokenImage(openSeaAsset.getImageUrl());
+        updateDefaultTokenData();
 
         String name = openSeaAsset.name;
         if (!TextUtils.isEmpty(name))
@@ -382,6 +421,31 @@ public class NFTAssetDetailActivity extends BaseActivity implements StandardFunc
     private void onOpenSeaAsset(OpenSeaAsset openSeaAsset)
     {
         loadFromOpenSeaData(openSeaAsset);
+    }
+
+    /**
+     * Final return path
+     * @param transactionData write success hash back to ActionSheet
+     */
+    private void txWritten(TransactionData transactionData)
+    {
+        confirmationDialog.transactionWritten(transactionData.txHash); //display hash and success in ActionSheet, start 1 second timer to dismiss.
+    }
+
+    //Transaction failed to be sent
+    private void txError(Throwable throwable)
+    {
+        if (dialog != null && dialog.isShowing()) dialog.dismiss();
+        dialog = new AWalletAlertDialog(this);
+        dialog.setIcon(ERROR);
+        dialog.setTitle(R.string.error_transaction_failed);
+        dialog.setMessage(throwable.getMessage());
+        dialog.setButtonText(R.string.button_ok);
+        dialog.setButtonListener(v -> {
+            dialog.dismiss();
+        });
+        dialog.show();
+        confirmationDialog.dismiss();
     }
 
     @Override

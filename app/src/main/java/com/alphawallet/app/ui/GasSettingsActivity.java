@@ -54,6 +54,7 @@ import java.util.regex.Pattern;
 
 import dagger.hilt.android.AndroidEntryPoint;
 import io.realm.Realm;
+import io.realm.RealmObject;
 import io.realm.RealmQuery;
 
 @AndroidEntryPoint
@@ -125,7 +126,7 @@ public class GasSettingsActivity extends BaseActivity implements GasSettingsCall
         availableBalance = new BigDecimal(getIntent().getStringExtra(C.EXTRA_TOKEN_BALANCE));
         sendAmount = new BigDecimal(getIntent().getStringExtra(C.EXTRA_AMOUNT));
         gasSliderView.setNonce(getIntent().getLongExtra(C.EXTRA_NONCE, -1));
-        gasSliderView.initGasLimit(customGasLimit.toBigInteger());
+        gasSliderView.initGasLimit(customGasLimit.toBigInteger(), presetGasLimit.toBigInteger());
         gasSpread = getIntent().getParcelableExtra(C.EXTRA_GAS_PRICE);
         isUsing1559 = getIntent().getBooleanExtra(C.EXTRA_1559_TX, false);
 
@@ -257,10 +258,16 @@ public class GasSettingsActivity extends BaseActivity implements GasSettingsCall
     public void onDestroy()
     {
         super.onDestroy();
-        if (realmGasSpread != null && realmGasSpread.isValid())
+        closeRealmSpread(realmGasSpread);
+        closeRealmSpread(realmLegacyGasSpread);
+    }
+
+    private void closeRealmSpread(RealmObject realmSpread)
+    {
+        if (realmSpread != null && realmSpread.isValid())
         {
-            realmGasSpread.removeAllChangeListeners();
-            if (!realmGasSpread.getRealm().isClosed()) realmGasSpread.getRealm().close();
+            realmSpread.removeAllChangeListeners();
+            if (!realmSpread.getRealm().isClosed()) realmSpread.getRealm().close();
         }
     }
 
@@ -355,7 +362,7 @@ public class GasSettingsActivity extends BaseActivity implements GasSettingsCall
             holder.itemLayout.setOnClickListener(v -> {
                 if (position == TXSpeed.CUSTOM && currentGasSpeedIndex != TXSpeed.CUSTOM)
                 {
-                    gasSliderView.initGasLimit(customGasLimit.toBigInteger());
+                    gasSliderView.initGasLimit(customGasLimit.toBigInteger(), presetGasLimit.toBigInteger());
                     gasSliderView.reportPosition();
                 }
                 else if (position != TXSpeed.CUSTOM && currentGasSpeedIndex == TXSpeed.CUSTOM)

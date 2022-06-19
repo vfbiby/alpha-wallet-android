@@ -44,10 +44,10 @@ import java.util.List;
 import dagger.hilt.android.AndroidEntryPoint;
 
 @AndroidEntryPoint
-public class NFTActivity extends BaseActivity implements StandardFunctionInterface {
-    NFTViewModel viewModel;
+public class NFTActivity extends BaseActivity implements StandardFunctionInterface
+{
+    private NFTViewModel viewModel;
 
-    private Menu menu;
     private Wallet wallet;
     private Token token;
     private FunctionButtonBar functionBar;
@@ -59,7 +59,7 @@ public class NFTActivity extends BaseActivity implements StandardFunctionInterfa
 
     private NFTAssetsFragment assetsFragment;
 
-    private ActivityResultLauncher<Intent> handleTransactionSuccess = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(),
+    private final ActivityResultLauncher<Intent> handleTransactionSuccess = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(),
             result -> {
                 if (result.getData() == null) return;
                 String transactionHash = result.getData().getStringExtra(C.EXTRA_TXHASH);
@@ -84,6 +84,9 @@ public class NFTActivity extends BaseActivity implements StandardFunctionInterfa
         setTitle(token.tokenInfo.name);
         isGridView = !hasTokenScriptOverride(token);
         setupViewPager();
+
+        //check NFT events, expedite balance update
+        viewModel.checkEventsForToken(token);
     }
 
     private boolean hasTokenScriptOverride(Token t)
@@ -107,6 +110,50 @@ public class NFTActivity extends BaseActivity implements StandardFunctionInterfa
         viewModel = new ViewModelProvider(this)
                 .get(NFTViewModel.class);
         viewModel.sig().observe(this, this::onSignature);
+        viewModel.tokenUpdate().observe(this, this::onBalanceUpdate);
+        viewModel.scriptUpdateInProgress().observe(this, this::startScriptDownload);
+        viewModel.newScriptFound().observe(this, this::newScriptFound);
+    }
+
+    private void newScriptFound(Boolean status)
+    {
+        CertifiedToolbarView certificateToolbar = findViewById(R.id.certified_toolbar);
+        certificateToolbar.stopDownload();
+        //determinate signature
+        if (token != null)
+        {
+            certificateToolbar.setVisibility(View.VISIBLE);
+            viewModel.checkTokenScriptValidity(token);
+        }
+    }
+
+    private void startScriptDownload(Boolean status)
+    {
+        CertifiedToolbarView certificateToolbar = findViewById(R.id.certified_toolbar);
+        if (status)
+        {
+            certificateToolbar.setVisibility(View.VISIBLE);
+            certificateToolbar.startDownload();
+        }
+        else
+        {
+            certificateToolbar.stopDownload();
+            certificateToolbar.setVisibility(View.GONE);
+        }
+    }
+
+    private void onBalanceUpdate(Token token)
+    {
+        assetsFragment.updateToken(token); //ensure token has the latest assets
+
+        if (isGridView)
+        {
+            assetsFragment.showGridView();
+        }
+        else
+        {
+            assetsFragment.showListView();
+        }
     }
 
     private void getIntentData()
@@ -155,7 +202,7 @@ public class NFTActivity extends BaseActivity implements StandardFunctionInterfa
     private void setupTabs(ViewPager2 viewPager, List<Pair<String, Fragment>> pages)
     {
         TabLayout tabLayout = findViewById(R.id.tab_layout);
-        new TabLayoutMediator(tabLayout, viewPager ,
+        new TabLayoutMediator(tabLayout, viewPager,
                 ((tab, position) -> tab.setText(pages.get(position).first))
         ).attach();
 
@@ -163,7 +210,8 @@ public class NFTActivity extends BaseActivity implements StandardFunctionInterfa
 
 //        viewPager.setCurrentItem(1, true);
 
-        tabLayout.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
+        tabLayout.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener()
+        {
             @Override
             public void onTabSelected(TabLayout.Tab tab)
             {
@@ -211,7 +259,8 @@ public class NFTActivity extends BaseActivity implements StandardFunctionInterfa
         {
             switchToListViewMenuItem.setVisible(true);
             switchToGridViewMenuItem.setVisible(false);
-        } else
+        }
+        else
         {
             switchToListViewMenuItem.setVisible(false);
             switchToGridViewMenuItem.setVisible(!hasTokenScriptOverride(token));
@@ -222,7 +271,6 @@ public class NFTActivity extends BaseActivity implements StandardFunctionInterfa
     @Override
     public boolean onCreateOptionsMenu(Menu menu)
     {
-        this.menu = menu;
         MenuInflater inflater = getMenuInflater();
         inflater.inflate(R.menu.menu_nft_display, menu);
         sendMultipleTokensMenuItem = menu.findItem(R.id.action_send_multiple_tokens);
@@ -234,7 +282,8 @@ public class NFTActivity extends BaseActivity implements StandardFunctionInterfa
             sendMultipleTokensMenuItem.setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_NEVER);
             switchToGridViewMenuItem.setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_NEVER);
             switchToListViewMenuItem.setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_NEVER);
-        } else
+        }
+        else
         {
             sendMultipleTokensMenuItem.setVisible(false);
             switchToGridViewMenuItem.setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_ALWAYS);
@@ -252,17 +301,26 @@ public class NFTActivity extends BaseActivity implements StandardFunctionInterfa
             switchToListViewMenuItem.setVisible(false);
             switchToGridViewMenuItem.setVisible(true);
             assetsFragment.showListView();
-        } else if (item.getItemId() == R.id.action_grid_view)
+        }
+        else if (item.getItemId() == R.id.action_grid_view)
         {
             isGridView = true;
             switchToListViewMenuItem.setVisible(true);
             switchToGridViewMenuItem.setVisible(false);
             assetsFragment.showGridView();
-        } else if (item.getItemId() == R.id.action_send_multiple_tokens)
+        }
+        else if (item.getItemId() == R.id.action_send_multiple_tokens)
         {
             handleTransactionSuccess.launch(viewModel.openSelectionModeIntent(this, token, wallet));
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    @Override
+    public void onDestroy()
+    {
+        super.onDestroy();
+        viewModel.onDestroy();
     }
 
     private void setupFunctionBar()
@@ -290,7 +348,8 @@ public class NFTActivity extends BaseActivity implements StandardFunctionInterfa
         {
             switchToListViewMenuItem.setVisible(true);
             switchToGridViewMenuItem.setVisible(false);
-        } else
+        }
+        else
         {
             switchToListViewMenuItem.setVisible(false);
             switchToGridViewMenuItem.setVisible(!hasTokenScriptOverride(token));
